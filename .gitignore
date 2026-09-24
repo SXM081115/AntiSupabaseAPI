@@ -1,0 +1,14 @@
+node_modules/
+.pnpm-store/
+dist/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+coverage/

@@ -1,0 +1,11 @@
+# 复制为 .dev.vars 后本地 `wrangler dev` 会自动加载（该文件已被 .gitignore 忽略）
+# 线上用 wrangler secret put 注入同名变量，不要写进 wrangler.jsonc 的 vars。
+
+# 必填：Supabase service_role key（含 /auth/v1/admin/ 与 /functions/v1/ 的调用都是它）
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.PLACEHOLDER_SERVICE_ROLE.SIGNATURE
+
+# 可选：anon key。不填则所有路径都用 service_role key
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.PLACEHOLDER_ANON.SIGNATURE
+
+# 可选：只有把 wrangler.jsonc 的 ENFORCE_PROXY_TOKEN 改成 "true" 才会启用
+PROXY_TOKEN=change-me-shared-token

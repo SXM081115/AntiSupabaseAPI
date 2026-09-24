@@ -1,0 +1,72 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "antisupabase-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "workers_dev": true,
+
+  // 需要绑定自定义域名时，先注释掉 workers_dev，再启用下面这段
+  // "routes": [
+  //   { "pattern": "api.example.com", "custom_domain": true }
+  // ],
+
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+
+  "vars": {
+    // ===== 目标：两种写法二选一 =====
+    // 1) 只给 project ref，Worker 会拼成 https://<ref>.supabase.co
+    "SUPABASE_PROJECT_REF": "your-project-ref",
+    // 2) 若你用的是 Supabase 自定义域名，填完整 URL（优先于上面的 ref）
+    // "SUPABASE_BASE_URL": "https://api.your-domain.com",
+
+    // ===== 路由 =====
+    "PROXY_PREFIX": "",
+    "ALLOWED_PATH_PREFIXES": "/functions/v1/,/auth/v1/,/storage/v1/",
+
+    // 哪些路径用 service_role key、哪些用 anon key（按前缀最长者优先匹配）
+    "SERVICE_KEY_PREFIXES": "/functions/v1/,/auth/v1/admin/",
+    "ANON_KEY_PREFIXES": "/auth/v1/,/storage/v1/",
+    "DEFAULT_KEY_SLOT": "anon",
+
+    // ===== CORS 白名单（逗号分隔，填 * 表示放行所有来源）=====
+    "ALLOWED_ORIGINS": "http://localhost:3000,http://localhost:5173",
+    "CORS_ALLOW_HEADERS": "authorization,apikey,content-type,x-client-info,x-request-id,x-supabase-api-version,x-upsert,x-proxy-token,prefer,range,accept,accept-language,cache-control,if-none-match",
+    "CORS_ALLOW_METHODS": "GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS",
+    "CORS_EXPOSE_HEADERS": "x-request-id,x-proxy-cache,content-range,content-length,location,link,x-supabase-api-version",
+    "CORS_MAX_AGE": "86400",
+    "CORS_ALLOW_CREDENTIALS": "false",
+
+    // ===== 上游弹性：超时 / 重试 / 熔断 =====
+    "UPSTREAM_TIMEOUT_MS": "30000",
+    "MAX_RETRIES": "1",
+    "RETRY_BACKOFF_MS": "250",
+    "MAX_TOTAL_MS": "60000",
+    "RETRY_STATUSES": "502,503,504",
+    "RETRY_ON_429": "false",
+    "RETRY_AFTER_MAX_MS": "5000",
+    "CIRCUIT_FAIL_THRESHOLD": "5",
+    "CIRCUIT_OPEN_MS": "15000",
+
+    // ===== 缓存（仅 GET，且只对下面这些前缀生效）=====
+    "CACHE_ENABLED": "true",
+    "CACHE_TTL_SECONDS": "60",
+    "CACHE_PATH_PREFIXES": "/storage/v1/object/public/",
+    "CACHE_VARY_HEADERS": "accept,accept-language",
+
+    // ===== URL / Cookie 改写 =====
+    "REWRITE_LOCATION": "true",
+    "REWRITE_JSON_HOSTS": "false",
+    "COOKIE_DOMAIN_STRIP": "true",
+    "STRIP_CLIENT_COOKIES": "true",
+
+    // ===== 入口门槛：默认完全开放；把它改成 "true" 并 set 一个 PROXY_TOKEN 即启用共享令牌 =====
+    "ENFORCE_PROXY_TOKEN": "false",
+
+    // ===== 可观测 =====
+    "LOG_LEVEL": "info",
+    "DEBUG_UPSTREAM_ERRORS": "false"
+  }
+}

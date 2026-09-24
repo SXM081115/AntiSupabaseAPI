@@ -1,0 +1,14 @@
+# 这个文件的作用：把本仓库钉成 pnpm 的 workspace 根目录。
+#
+# 背景：若上级目录（例如 C:\Users\<你>\）也存在 pnpm-workspace.yaml，
+# pnpm 会把本仓库当成「不属于任何 workspace 的目录」而直接跳过安装
+# （表现为 `pnpm install` 只打印 "Already up to date" 且不生成 node_modules）。
+# 在仓库根放置本文件后，pnpm 会就近停在这里，安装行为恢复正常。
+packages:
+  - "."
+
+# wrangler(workerd) 与 vitest(esbuild) 需要执行安装脚本才能落地原生二进制；
+# pnpm 10/11 默认禁止依赖跑构建脚本，这里显式放行。
+allowBuilds:
+  esbuild: true
+  workerd: true
