@@ -5,10 +5,27 @@
   "compatibility_date": "2025-09-01",
   "workers_dev": true,
 
-  // 需要绑定自定义域名时，先注释掉 workers_dev，再启用下面这段
+  // ===== 自定义域名接入：默认「只开 workers.dev」，保证首次 deploy 必定成功 =====
+  // 选定方案后取消对应注释即可；同一主机名不能同时是两台 Worker 的 Custom Domain，
+  // 但可以「A 持有 Custom Domain + B 持有更具体的路径路由」，Cloudflare 优先匹配更具体的路径。
+  //
+  // 方案 A（推荐，edge.sxm2027.icu 已被另一个 Worker 占用时用这个）：
+  //   保持原来那个 Worker 与 Custom Domain 完全不动，只给本 Worker 加一条路径路由。
+  //   注意：放开前先确认 sxm2027.icu 这个 zone 在同一个 Cloudflare 账号里，否则 deploy 会因找不到 zone 而整体失败。
+  //   同时必须把下面的 PROXY_PREFIX 改成 "/sb"（与路由路径对齐）。
+  //   客户端访问：https://edge.sxm2027.icu/sb/functions/v1/<函数名>
   // "routes": [
-  //   { "pattern": "api.example.com", "custom_domain": true }
+  //   { "pattern": "edge.sxm2027.icu/sb/*", "zone_name": "sxm2027.icu" }
   // ],
+  //
+  // 方案 B（另起一个没人用的子域，Cloudflare 自动建 DNS 记录与证书，零冲突）：
+  //   客户端访问：https://edge-api.sxm2027.icu/functions/v1/<函数名>
+  // "routes": [
+  //   { "pattern": "edge-api.sxm2027.icu", "custom_domain": true }
+  // ],
+  //
+  // 方案 C（什么都不配）：
+  //   客户端访问：https://antisupabase-api.<你的子域>.workers.dev/functions/v1/<函数名>
 
   "observability": {
     "enabled": true,
@@ -18,11 +35,13 @@
   "vars": {
     // ===== 目标：两种写法二选一 =====
     // 1) 只给 project ref，Worker 会拼成 https://<ref>.supabase.co
-    "SUPABASE_PROJECT_REF": "your-project-ref",
+    //    已填真实值：bkewnttfjkbbshnouwtv → https://bkewnttfjkbbshnouwtv.supabase.co（已实测连通，未带 key 返回 401）
+    "SUPABASE_PROJECT_REF": "bkewnttfjkbbshnouwtv",
     // 2) 若你用的是 Supabase 自定义域名，填完整 URL（优先于上面的 ref）
     // "SUPABASE_BASE_URL": "https://api.your-domain.com",
 
     // ===== 路由 =====
+    // 走 wrangler.jsonc 里的「方案 A」路径路由时，这里必须改成 "/sb"；其余方案保持 ""
     "PROXY_PREFIX": "",
     "ALLOWED_PATH_PREFIXES": "/functions/v1/,/auth/v1/,/storage/v1/",
 
@@ -31,8 +50,9 @@
     "ANON_KEY_PREFIXES": "/auth/v1/,/storage/v1/",
     "DEFAULT_KEY_SLOT": "anon",
 
-    // ===== CORS 白名单（逗号分隔，填 * 表示放行所有来源）=====
-    "ALLOWED_ORIGINS": "http://localhost:3000,http://localhost:5173",
+    // ===== CORS：填 * 表示放行所有来源（你的要求：所有用户都能访问）=====
+    // 用 * 时浏览器不允许携带凭据，本项目已强制把 Access-Control-Allow-Credentials 关掉
+    "ALLOWED_ORIGINS": "*",
     "CORS_ALLOW_HEADERS": "authorization,apikey,content-type,x-client-info,x-request-id,x-supabase-api-version,x-upsert,x-proxy-token,prefer,range,accept,accept-language,cache-control,if-none-match",
     "CORS_ALLOW_METHODS": "GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS",
     "CORS_EXPOSE_HEADERS": "x-request-id,x-proxy-cache,content-range,content-length,location,link,x-supabase-api-version",

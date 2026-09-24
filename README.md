@@ -41,14 +41,67 @@ Supabase 项目的**唯一 ID**（20 位左右的字母数字，例如 `abcdefgh
 
 推荐最终形态：Worker 用 `edge.yourdomain.com`，Supabase 保持 `<ref>.supabase.co`。
 
+### 1.3 「前端来源」是什么
+
+浏览器发起跨域请求时**自动带上**的请求头，形如 `Origin: https://app.example.com`。
+构成是 **协议 + 域名 + 端口** 三件套（没有路径），三者任一不同就算「不同来源」。
+
+CORS 白名单的作用就是决定：要不要把这个 Origin 原样回显到 `Access-Control-Allow-Origin`。回显了浏览器才放行。
+
+- 你的要求是「所有用户都能访问」→ `ALLOWED_ORIGINS` 填 `*`（**本项目已按此配好**）。
+- 填 `*` 时浏览器不允许再带凭据（Cookie），所以本项目强制把 `Access-Control-Allow-Credentials` 关掉。
+- `*` 只影响**浏览器**的跨域限制；curl、服务端、原生 App 本来就不受 CORS 约束。
+- 以后想收窄就换成逗号分隔列表：`https://app.sxm2027.icu,http://localhost:3000`。
+
+### 1.4 Cloudflare Account ID 在哪找
+
+四种方式任选，结果一样（32 位十六进制，形如 `a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6`）：
+
+1. **仪表盘右侧栏**：登录 dash.cloudflare.com → 点任意域名 → **Overview** 页右下角 `Account ID`；复制按钮直接可用。
+2. **Workers & Pages**：左侧栏 `Workers & Pages` → Overview，右侧栏同样列 `Account ID`。
+3. **看地址栏**：`https://dash.cloudflare.com/<这一串就是 Account ID>/<域名>`。
+4. **命令行**：`pnpm wrangler whoami` —— 会打印当前账号名、Account ID 和 token 权限（最省事，顺手确认登录状态）。
+
+### 1.5 域名接入三方案（你的 `edge.sxm2027.icu` 已被另一个 Worker 占用）
+
+结论先给：**同一主机名不能同时作为两台 Worker 的 Custom Domain**，
+但可以「A 持有 Custom Domain + B 持有**更具体的路径路由**」共存 —— Cloudflare 优先匹配更具体的路径。
+
+官方文档 [Custom Domains → Interaction with Routes](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/) 举的正是这个例子：
+`api.example.com` 的 Custom Domain 指向 `api-worker`，再给 `auth-worker` 加一条 `api.example.com/auth` 路由，
+则访问 `api.example.com/auth` 命中的是 `auth-worker`，其余路径仍归 `api-worker`。
+
+| 方案 | 做法 | 客户端 URL | 前提 |
+| --- | --- | --- | --- |
+| **A. 路径路由**（推荐） | 原 Worker 与 Custom Domain **完全不动**，给本 Worker 加一条 `edge.sxm2027.icu/sb/*` 路由 | `https://edge.sxm2027.icu/sb/functions/v1/x` | `sxm2027.icu` 与 Worker 在**同一 Cloudflare 账号** |
+| **B. 新子域** | 给本 Worker 绑 `edge-api.sxm2027.icu` 作 Custom Domain，Cloudflare 自动建 DNS 与证书 | `https://edge-api.sxm2027.icu/functions/v1/x` | 无 |
+| **C. workers.dev** | 什么都不配，用免费子域 | `https://antisupabase-api.<你的>.workers.dev/functions/v1/x` | 无 |
+
+**当前状态：默认走 C**（只开 `workers_dev`），这样首次 `pnpm wrangler deploy` 必定成功、不会因为域名冲突整体失败。
+选定后在 `wrangler.jsonc` 里取消对应注释即可，两处都已写好：
+
+方案 A 需要同时改两个地方：
+
+```jsonc
+// wrangler.jsonc
+"routes": [{ "pattern": "edge.sxm2027.icu/sb/*", "zone_name": "sxm2027.icu" }],
+// 并把 vars.PROXY_PREFIX 改成 "/sb"
+```
+
+三个注意点：
+
+1. 访问要用**带斜杠**的 `/sb/...` 形式（pattern `host/sb/*` 不含裸 `/sb`）；
+2. 放开路由前先确认 `sxm2027.icu` 这个 zone 就在同一个 Cloudflare 账号里（账号里左侧能看到这个域名即是），否则 deploy 会报找不到 zone 并整体失败；
+3. 给 supabase-js 用时 base URL 写 `https://edge.sxm2027.icu/sb`（SDK 会自己往后拼 `/auth/v1/token` 等）。
+
 ## 2. 快速开始
 
 ```bash
 # 1) 安装依赖
 pnpm install
 
-# 2) 填 project ref（把 your-project-ref 换成真实值）
-#    编辑 wrangler.jsonc → vars.SUPABASE_PROJECT_REF
+# 2) project ref 已经填好（bkewnttfjkbbshnouwtv → https://bkewnttfjkbbshnouwtv.supabase.co）
+#    换项目时才需要改 wrangler.jsonc → vars.SUPABASE_PROJECT_REF
 
 # 3) 注入密钥（不会进 git，也不会出现在 wrangler.jsonc 里）
 pnpm wrangler secret put SUPABASE_SERVICE_ROLE_KEY
