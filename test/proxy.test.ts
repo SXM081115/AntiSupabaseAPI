@@ -386,4 +386,16 @@ describe("缺配置时不崩", () => {
     expect(response.status).toBe(500);
     expect(body.error.code).toBe("MISSING_CONFIG");
   });
+
+  it("配置缺失时健康检查仍可访问，返回 503 并说明原因", async () => {
+    const { ctx } = createTestContext();
+    const response = await worker.fetch(request("/__health", { method: "GET" }), {}, ctx);
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.ok).toBe(false);
+    expect(body.config_ok).toBe(false);
+    expect(body.config_error).toContain("SUPABASE_PROJECT_REF");
+    expect(response.headers.get("x-request-id")).toBeTruthy();
+  });
 });

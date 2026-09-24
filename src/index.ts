@@ -12,6 +12,45 @@ import type { Env } from "./types";
 const VERSION = "0.1.0";
 const HEALTH_PATH = "/__health";
 
+/** 不依赖配置就能算出的对外前缀，用于识别健康检查路径。 */
+function rawProxyPrefix(env: Env): string {
+  return (env.PROXY_PREFIX ?? "").trim().replace(/\/+$/, "");
+}
+
+function isHealthRequest(url: URL, env: Env): boolean {
+  return url.pathname === HEALTH_PATH || url.pathname === `${rawProxyPrefix(env)}${HEALTH_PATH}`;
+}
+
+/**
+ * 健康检查：不触碰上游，且在配置缺失时也能回答（返回 503 + config_error），
+ * 这样「配错了」和「服务挂了」在监控上能分得清。
+ */
+function handleHealth(url: URL, env: Env, request: Request, requestId: string): Response {
+  let cfg: AppConfig | null = null;
+  let configError: string | null = null;
+  try {
+    cfg = loadConfig(env, url);
+  } catch (err) {
+    configError = err instanceof Error ? err.message : String(err);
+  }
+
+  const payload = {
+    ok: configError === null,
+    service: "antisupabase-api",
+    version: VERSION,
+    config_ok: configError === null,
+    ...(configError ? { config_error: configError } : {}),
+    time: new Date().toISOString(),
+  };
+
+  const base = jsonResponse(payload, configError ? 503 : 200);
+  if (cfg) return withCors(base, request, cfg, requestId, "BYPASS");
+
+  const headers = new Headers(base.headers);
+  headers.set("x-request-id", requestId);
+  return new Response(base.body, { status: base.status, headers });
+}
+
 /** 复用客户端传来的 request id（便于端到端追踪），否则生成一个。 */
 function readRequestId(request: Request): string {
   const raw = (request.headers.get("x-request-id") ?? "").trim();
@@ -66,6 +105,11 @@ export default {
     const requestId = readRequestId(request);
     const url = new URL(request.url);
 
+    // ---- 0. 健康检查：先于配置解析，配错了也能自证 ----
+    if (isHealthRequest(url, env)) {
+      return handleHealth(url, env, request, requestId);
+    }
+
     // ---- 1. 载入配置：失败也返回结构化 JSON，而不是 500 白页 ----
     let cfg: AppConfig;
     try {
@@ -89,16 +133,7 @@ export default {
     const method = request.method.toUpperCase();
 
     try {
-      // ---- 2. 健康检查：不触碰上游 ----
-      if (url.pathname === HEALTH_PATH || url.pathname === `${cfg.proxyPrefix}${HEALTH_PATH}`) {
-        return withCors(
-          jsonResponse({ ok: true, service: "antisupabase-api", version: VERSION, time: new Date().toISOString() }),
-          request,
-          cfg,
-          requestId,
-          "BYPASS",
-        );
-      }
+      // ---- 2. 健康检查已提前处理，这里进入正式反代流程 ----
 
       // ---- 3. CORS 预检本地应答 ----
       if (method === "OPTIONS") {

@@ -153,7 +153,34 @@ curl -i -X POST "https://antisupabase-api.<你的子域>.workers.dev/functions/v
 | `LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error` |
 | `DEBUG_UPSTREAM_ERRORS` | `false` | 错误响应里是否附带内部细节 |
 
-## 6. 关于「完全开放 + 密钥全隐藏」这个组合
+## 6. 本地用假上游自测（不消耗 Supabase 额度）
+
+想验证「密钥真的被替换了」「Cookie 真的被丢了」，不用连真实 Supabase：
+
+```bash
+# 终端 A：起一个把请求原样回显的假上游（127.0.0.1:8801）
+pnpm run mock:upstream
+
+# 终端 B：建一个 .dev.vars（覆盖 wrangler.jsonc 的 vars，仅本地生效）
+cat > .dev.vars <<'EOF'
+SUPABASE_BASE_URL=http://127.0.0.1:8801
+SUPABASE_SERVICE_ROLE_KEY=service-key-value
+SUPABASE_ANON_KEY=anon-key-value
+EOF
+
+# 终端 C：跑起来
+pnpm run dev
+
+# 终端 D：打一发伪造身份的请求，看回显里 apikey 已被换掉、cookie 已消失
+curl -s -X POST "http://127.0.0.1:8787/functions/v1/hello" \
+  -H "content-type: application/json" \
+  -H "authorization: Bearer forged" -H "apikey: forged" -H "cookie: sb=leak" \
+  -d 'name=x'
+```
+
+回显里应当看到 `"apikey": "service-key-value"`，且**没有** `cookie` 字段。用完删掉 `.dev.vars` 即可。
+
+## 7. 关于「完全开放 + 密钥全隐藏」这个组合
 
 当前配置下，**任何拿到 Worker 域名的人都能以 `service_role` 身份调用你的 `/functions/v1/`**，
 这等价于把你的 Supabase 管理权限挂在公网上。想收口时按代价从低到高选一个：
@@ -163,7 +190,7 @@ curl -i -X POST "https://antisupabase-api.<你的子域>.workers.dev/functions/v
 2. **收窄白名单**：删掉 `SERVICE_KEY_PREFIXES` 里的 `/auth/v1/admin/`，把 `ALLOWED_PATH_PREFIXES` 缩到只剩需要的函数前缀。
 3. **Cloudflare Access**：在域名前面加一层 Zero Trust 策略，代码零改动。
 
-## 7. 可观测
+## 8. 可观测
 
 每次请求输出一行 JSON，直接可在 `pnpm run tail` / Workers Logs 里按字段过滤：
 
@@ -176,7 +203,7 @@ curl -i -X POST "https://antisupabase-api.<你的子域>.workers.dev/functions/v
 `x-request-id` 会透传到上游并回写响应（客户端传了合法值就复用），端到端可串起来。
 `x-proxy-cache: HIT | MISS | BYPASS` 直接反映缓存结果。
 
-## 8. 错误码
+## 9. 错误码
 
 | HTTP | code | 含义 |
 | --- | --- | --- |
@@ -194,7 +221,7 @@ curl -i -X POST "https://antisupabase-api.<你的子域>.workers.dev/functions/v
 { "error": { "code": "CIRCUIT_OPEN", "message": "…", "request_id": "…", "details": { "retry_after_ms": 12000 } } }
 ```
 
-## 9. 故障排查
+## 10. 故障排查
 
 | 现象 | 排查 |
 | --- | --- |
@@ -205,7 +232,7 @@ curl -i -X POST "https://antisupabase-api.<你的子域>.workers.dev/functions/v
 | 401/403 来自 Supabase 而不是 Worker | 该路径的 key 选错了：检查 `SERVICE_KEY_PREFIXES` / `ANON_KEY_PREFIXES`。 |
 | 上传/下载大文件异常 | 确认没有给 `CACHE_PATH_PREFIXES` 加进非 public 的 storage 前缀，且未对带 `Range` 的请求启用缓存（代码已跳过 Range）。 |
 
-## 10. CI/CD
+## 11. CI/CD
 
 `.github/workflows/deploy.yml`：push 到 `main` 时先 typecheck + 跑测试，再用 Wrangler 部署。
 需要在 GitHub 仓库 Secrets 里配置：
@@ -217,13 +244,14 @@ curl -i -X POST "https://antisupabase-api.<你的子域>.workers.dev/functions/v
 | `SUPABASE_SERVICE_ROLE_KEY` | 同步为 Worker secret |
 | `SUPABASE_ANON_KEY` | 同步为 Worker secret（可选） |
 
-## 11. 开发命令
+## 12. 开发命令
 
 ```bash
-pnpm run dev          # wrangler dev，本地 8787
-pnpm run typecheck    # tsc --noEmit
-pnpm run test         # vitest，40 个用例
-pnpm run check        # typecheck + test
-pnpm run tail         # 实时日志
-pnpm run deploy       # 部署
+pnpm run dev            # wrangler dev，本地 8787
+pnpm run mock:upstream  # 本地假上游，127.0.0.1:8801
+pnpm run typecheck      # tsc --noEmit
+pnpm run test           # vitest，41 个用例
+pnpm run check          # typecheck + test
+pnpm run tail           # 实时日志
+pnpm run deploy         # 部署
 ```
