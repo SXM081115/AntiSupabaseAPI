@@ -8,15 +8,13 @@
     "dev": "wrangler dev",
     "deploy": "node scripts/deploy.mjs",
     "deploy:raw": "wrangler deploy --keep-vars",
-    "secret:sync": "node scripts/deploy.mjs --skip-verify",
+    "store:sync": "node scripts/deploy.mjs --sync-store",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "npm run typecheck && npm run test",
     "mock:upstream": "node scripts/mock-upstream.mjs",
     "tail": "wrangler tail --format pretty",
-    "secret:service": "wrangler secret put SUPABASE_SERVICE_ROLE_KEY",
-    "secret:anon": "wrangler secret put SUPABASE_ANON_KEY",
     "secret:token": "wrangler secret put PROXY_TOKEN"
   },
   "devDependencies": {

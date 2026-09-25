@@ -17,13 +17,49 @@ export function resolveKeySlot(path: string, cfg: AppConfig): KeySlot {
   return cfg.defaultKeySlot;
 }
 
+/** 密钥绑定在运行时可能是「字符串」或「带 get() 的对象」两种形态。 */
+export interface SecretBindingShape {
+  /** typeof 结果，用于诊断 */
+  type: string;
+  /** 是否需要在取值前 await 一个 get() */
+  async: boolean;
+}
+
+/**
+ * 统一读取密钥绑定，同时兼容两种形态：
+ *  1. 普通文本 secret / var / .dev.vars —— 直接就是 string；
+ *  2. Cloudflare Secrets Store 绑定 —— 暴露的是一个带 `get()` 的对象，
+ *     直接当字符串用会拿到空值（本项目实测踩过：env.X 读出 undefined，
+ *     而 secret list 与 store 里密钥都健在）。
+ */
+export async function readSecretBinding(binding: unknown): Promise<{ value: string; shape: SecretBindingShape }> {
+  if (typeof binding === "string") {
+    return { value: binding.trim(), shape: { type: "string", async: false } };
+  }
+
+  const maybe = binding as { get?: unknown } | null | undefined;
+  if (maybe && typeof maybe.get === "function") {
+    try {
+      const raw = await (maybe.get as () => unknown | Promise<unknown>)();
+      return {
+        value: typeof raw === "string" ? raw.trim() : "",
+        shape: { type: typeof binding, async: true },
+      };
+    } catch {
+      return { value: "", shape: { type: typeof binding, async: true } };
+    }
+  }
+
+  return { value: "", shape: { type: binding === null ? "null" : typeof binding, async: false } };
+}
+
 /**
  * 取到真实密钥。key 只在 Worker 内部流转：
  * 客户端送来的 apikey / Authorization 在 proxy.ts 里被无条件丢弃后再由这里注入。
  */
-export function resolveKey(slot: KeySlot, env: Env): ResolvedKey {
-  const service = (env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
-  const anon = (env.SUPABASE_ANON_KEY ?? "").trim();
+export async function resolveKey(slot: KeySlot, env: Env): Promise<ResolvedKey> {
+  const service = (await readSecretBinding(env.SUPABASE_SERVICE_ROLE_KEY)).value;
+  const anon = (await readSecretBinding(env.SUPABASE_ANON_KEY)).value;
 
   if (slot === "anon") {
     if (anon) return { slot, key: anon };

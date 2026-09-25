@@ -7,8 +7,26 @@
 
   // ⚠️ 必须保留：wrangler deploy 默认会把「配置里没写的 vars 与 secrets 全部删除」，
   // 这会把 wrangler secret put 注入的 Supabase 密钥一起抹掉（表现为线上 500 MISSING_CONFIG）。
-  // keep_vars=true 让已存在的环境变量在部署时不被清空，secrets 才能稳定存活。
   "keep_vars": true,
+
+  // ===== Supabase 密钥：走 Secrets Store 绑定（确定性方案，必须保留）=====
+  // 为什么不用 `wrangler secret put`：那种密钥挂在 script 上，而 deploy 以「版本」为单位
+  // 重建绑定快照，密钥绑定会随部署丢失 —— 现象是 secret list 里密钥都在、线上 env 却是空的，
+  // 且症状延后数分钟才出现，极难排查（本项目实测复现过两次）。
+  // 写成下面的绑定后，绑定本身进入每个版本的快照，任何部署方式都不会再丢。
+  // 换密钥：wrangler secrets-store secret update <store-id> --name <NAME> --value <V> --remote
+  "secrets_store_secrets": [
+    {
+      "binding": "SUPABASE_SERVICE_ROLE_KEY",
+      "store_id": "c181d40ddfe2475da76cf25fe5c0905f",
+      "secret_name": "SUPABASE_SERVICE_ROLE_KEY"
+    },
+    {
+      "binding": "SUPABASE_ANON_KEY",
+      "store_id": "c181d40ddfe2475da76cf25fe5c0905f",
+      "secret_name": "SUPABASE_ANON_KEY"
+    }
+  ],
 
   // ===== 自定义域名接入：默认「只开 workers.dev」，保证首次 deploy 必定成功 =====
   // 选定方案后取消对应注释即可；同一主机名不能同时是两台 Worker 的 Custom Domain，

@@ -3,7 +3,7 @@ import { loadConfig, type AppConfig } from "./config";
 import { corsPreflight, withCors } from "./cors";
 import { ProxyError, asProxyError, errorPayload } from "./errors";
 import { applyNodeDuplexShim, jsonResponse } from "./http";
-import { circuitKeyFor, resolveKey, resolveKeySlot } from "./keys";
+import { circuitKeyFor, readSecretBinding, resolveKey, resolveKeySlot } from "./keys";
 import { createLogger } from "./log";
 import { buildUpstreamHeaders, buildUpstreamUrl, finalizeUpstreamResponse, normalizeRequestPath } from "./proxy";
 import { fetchWithResilience } from "./resilience";
@@ -25,12 +25,12 @@ function isHealthRequest(url: URL, env: Env): boolean {
  * 健康检查：不触碰上游，且在配置缺失时也能回答（返回 503 + config_error），
  * 这样「配错了」和「服务挂了」在监控上能分得清。
  *
- * 同时暴露「密钥是否真的绑定到了运行时 env」—— 这是本仓库踩过的真实坑：
- * wrangler secret bulk 走旧的 script-secrets 接口，若之后又跑 wrangler deploy，
- * 新版本的绑定快照里会丢掉密钥，表现为 500 MISSING_CONFIG，但 secret list 里密钥仍在。
- * 这里只回布尔值，绝不回显密钥内容或长度。
+ * 同时暴露「密钥是否真的能被读到」—— 这是本仓库踩过的真实坑：
+ * 密钥绑定在不同形态下取值方式不同（string vs 带 get() 的对象），
+ * 拿不到时表现为 500 MISSING_CONFIG，而 secret list / secrets store 里密钥都健在。
+ * 这里只回类型、是否需要 await、以及长度，绝不回显密钥内容。
  */
-function handleHealth(url: URL, env: Env, request: Request, requestId: string): Response {
+async function handleHealth(url: URL, env: Env, request: Request, requestId: string): Promise<Response> {
   let cfg: AppConfig | null = null;
   let configError: string | null = null;
   try {
@@ -39,8 +39,10 @@ function handleHealth(url: URL, env: Env, request: Request, requestId: string): 
     configError = err instanceof Error ? err.message : String(err);
   }
 
-  const hasServiceKey = (env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim().length > 0;
-  const hasAnonKey = (env.SUPABASE_ANON_KEY ?? "").trim().length > 0;
+  const svc = await readSecretBinding(env.SUPABASE_SERVICE_ROLE_KEY);
+  const anon = await readSecretBinding(env.SUPABASE_ANON_KEY);
+  const hasServiceKey = svc.value.length > 0;
+  const hasAnonKey = anon.value.length > 0;
   // service key 是必需的（/functions/v1 与 /auth/v1/admin 都靠它）
   const ok = configError === null && hasServiceKey;
 
@@ -51,6 +53,11 @@ function handleHealth(url: URL, env: Env, request: Request, requestId: string): 
     config_ok: configError === null,
     has_service_role_key: hasServiceKey,
     has_anon_key: hasAnonKey,
+    // 诊断用：绑定在运行时的真实形态（string / object、是否要 await get()、长度）
+    key_binding: {
+      service: { type: svc.shape.type, async: svc.shape.async, length: svc.value.length },
+      anon: { type: anon.shape.type, async: anon.shape.async, length: anon.value.length },
+    },
     ...(configError ? { config_error: configError } : {}),
     time: new Date().toISOString(),
   };
@@ -119,7 +126,7 @@ export default {
 
     // ---- 0. 健康检查：先于配置解析，配错了也能自证 ----
     if (isHealthRequest(url, env)) {
-      return handleHealth(url, env, request, requestId);
+      return await handleHealth(url, env, request, requestId);
     }
 
     // ---- 1. 载入配置：失败也返回结构化 JSON，而不是 500 白页 ----
@@ -178,7 +185,7 @@ export default {
       }
 
       // ---- 7. 选 key、拼上游请求 ----
-      const key = resolveKey(resolveKeySlot(path, cfg), env);
+      const key = await resolveKey(resolveKeySlot(path, cfg), env);
       const upstreamUrl = buildUpstreamUrl(path, url.search, cfg);
       const headers = buildUpstreamHeaders(
         request,

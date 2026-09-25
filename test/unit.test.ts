@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig, matchesPrefix, normalizePrefix, resolveUpstreamOrigin } from "../src/config";
 import { buildUpstreamUrl, normalizeRequestPath } from "../src/proxy";
-import { resolveKey, resolveKeySlot } from "../src/keys";
+import { resolveKey, readSecretBinding, resolveKeySlot } from "../src/keys";
 import { env } from "./helpers";
 
 describe("配置解析", () => {
@@ -51,14 +51,36 @@ describe("密钥槽位路由（最长前缀优先）", () => {
     expect(resolveKeySlot("/storage/v1/object/public/bucket/a.png", cfg)).toBe("anon");
   });
 
-  it("anon key 缺省时自动回落到 service key", () => {
+  it("anon key 缺省时自动回落到 service key", async () => {
     const noAnon = loadConfig(env({ SUPABASE_ANON_KEY: undefined }));
-    expect(resolveKey("anon", env({ SUPABASE_ANON_KEY: undefined })).key).toBe("service-key-value");
+    expect((await resolveKey("anon", env({ SUPABASE_ANON_KEY: undefined }))).key).toBe("service-key-value");
     expect(resolveKeySlot("/auth/v1/token", noAnon)).toBe("anon");
   });
 
-  it("service key 缺失时返回 MISSING_CONFIG", () => {
-    expect(() => resolveKey("service", env({ SUPABASE_SERVICE_ROLE_KEY: undefined }))).toThrowError(/SERVICE_ROLE/);
+  it("service key 缺失时返回 MISSING_CONFIG", async () => {
+    await expect(resolveKey("service", env({ SUPABASE_SERVICE_ROLE_KEY: undefined }))).rejects.toThrowError(/SERVICE_ROLE/);
+  });
+
+  // 回归用例：Cloudflare Secrets Store 绑定的形态是「带 get() 的对象」而不是字符串，
+  // 直接当字符串取值会拿到空值 → 线上 500 MISSING_CONFIG（本项目真实踩过）
+  it("支持 Secrets Store 形态的绑定（带 get() 的对象）", async () => {
+    const storeEnv = env({
+      SUPABASE_SERVICE_ROLE_KEY: { get: async () => "service-key-value" } as unknown as string,
+      SUPABASE_ANON_KEY: { get: () => "anon-key-value" } as unknown as string,
+    });
+
+    expect((await resolveKey("service", storeEnv)).key).toBe("service-key-value");
+    expect((await resolveKey("anon", storeEnv)).key).toBe("anon-key-value");
+
+    const shape = await readSecretBinding(storeEnv.SUPABASE_SERVICE_ROLE_KEY);
+    expect(shape.value).toBe("service-key-value");
+    expect(shape.shape.async).toBe(true);
+  });
+
+  it("readSecretBinding 对空绑定返回空值而非抛错", async () => {
+    expect((await readSecretBinding(undefined)).value).toBe("");
+    expect((await readSecretBinding(null)).value).toBe("");
+    expect((await readSecretBinding("  x  ")).value).toBe("x");
   });
 });
 
