@@ -5,6 +5,11 @@
   "compatibility_date": "2025-09-01",
   "workers_dev": true,
 
+  // ⚠️ 必须保留：wrangler deploy 默认会把「配置里没写的 vars 与 secrets 全部删除」，
+  // 这会把 wrangler secret put 注入的 Supabase 密钥一起抹掉（表现为线上 500 MISSING_CONFIG）。
+  // keep_vars=true 让已存在的环境变量在部署时不被清空，secrets 才能稳定存活。
+  "keep_vars": true,
+
   // ===== 自定义域名接入：默认「只开 workers.dev」，保证首次 deploy 必定成功 =====
   // 选定方案后取消对应注释即可；同一主机名不能同时是两台 Worker 的 Custom Domain，
   // 但可以「A 持有 Custom Domain + B 持有更具体的路径路由」，Cloudflare 优先匹配更具体的路径。

@@ -114,6 +114,11 @@ CORS 白名单的作用就是决定：要不要把这个 Origin 原样回显到 
 
 ## 2. 快速开始
 
+> ⚠️ **最重要的一条运维注意（本项目已踩过）**：`wrangler deploy` 默认会把「Wrangler 配置里没有声明的 vars 与 secrets 全部删除」，
+> 也就是会把 `wrangler secret put` 注入的 Supabase 密钥一起抹掉，线上表现为 **500 `MISSING_CONFIG`**。
+> `wrangler.jsonc` 已固定 `"keep_vars": true` 来避免这件事；如果你手工敲命令，请写成 `pnpm wrangler deploy --keep-vars`。
+> 详见 [Cloudflare 文档 keep_vars](https://developers.cloudflare.com/workers/wrangler/configuration/)。
+
 ```bash
 # 1) 安装依赖
 pnpm install
@@ -298,7 +303,8 @@ curl -s -X POST "http://127.0.0.1:8787/functions/v1/hello" \
 | --- | --- |
 | `pnpm install` 只打印 `Already up to date` 且没有 `node_modules` | 上级目录（如 `C:\Users\<你>\`）有 `pnpm-workspace.yaml`，被当成了它的子目录。仓库根的 `pnpm-workspace.yaml` 已修好这点；若仍复现，用 `pnpm install --ignore-workspace`。 |
 | 本地 `pnpm run dev` 报缺密钥 | `.dev.vars` 没建好，或名字拼错（大小写敏感）。 |
-| 线上 500 `MISSING_CONFIG` | `wrangler secret put` 没执行，或 `SUPABASE_PROJECT_REF` 还是占位值 `your-project-ref`。 |
+| 线上 500 `MISSING_CONFIG`（但 `wrangler secret list` 明明能看到密钥） | **`wrangler deploy` 默认会把「配置里没写的 vars 与 secrets 全部删除」**（Wrangler 配置是唯一事实源），密钥绑定会被一起抹掉。`wrangler.jsonc` 已加 `"keep_vars": true`；手工部署请带 `--keep-vars`。详见下方 §2 的注意事项。 |
+| 线上 500 `MISSING_CONFIG`（密钥确实没传过） | `wrangler secret put` 没执行，或 `SUPABASE_PROJECT_REF` 还是占位值。 |
 | 浏览器 CORS 报错 | `ALLOWED_ORIGINS` 没加你的前端来源（含端口与协议，`https://` 与 `http://` 视作不同来源）。 |
 | 401/403 来自 Supabase 而不是 Worker | 该路径的 key 选错了：检查 `SERVICE_KEY_PREFIXES` / `ANON_KEY_PREFIXES`。 |
 | 上传/下载大文件异常 | 确认没有给 `CACHE_PATH_PREFIXES` 加进非 public 的 storage 前缀，且未对带 `Range` 的请求启用缓存（代码已跳过 Range）。 |
