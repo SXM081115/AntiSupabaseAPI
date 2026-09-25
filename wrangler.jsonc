@@ -27,6 +27,13 @@
   // 方案 C（什么都不配）：
   //   客户端访问：https://antisupabase-api.<你的子域>.workers.dev/functions/v1/<函数名>
 
+  // 实测 edge.sxm2027.icu 当前无任何生效记录（TLS 握手中断，表现与随机子域一致），
+  // 因此先直接按 Custom Domain 绑定；若该主机名确实被别的 Worker 占用，deploy 会报错，
+  // 届时改用上面的「方案 A」路径路由即可共存。
+  "routes": [
+    { "pattern": "edge.sxm2027.icu", "custom_domain": true }
+  ],
+
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1

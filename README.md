@@ -77,10 +77,28 @@ CORS 白名单的作用就是决定：要不要把这个 Origin 原样回显到 
 | **B. 新子域** | 给本 Worker 绑 `edge-api.sxm2027.icu` 作 Custom Domain，Cloudflare 自动建 DNS 与证书 | `https://edge-api.sxm2027.icu/functions/v1/x` | 无 |
 | **C. workers.dev** | 什么都不配，用免费子域 | `https://antisupabase-api.<你的>.workers.dev/functions/v1/x` | 无 |
 
-**当前状态：默认走 C**（只开 `workers_dev`），这样首次 `pnpm wrangler deploy` 必定成功、不会因为域名冲突整体失败。
-选定后在 `wrangler.jsonc` 里取消对应注释即可，两处都已写好：
+**当前状态：已上线。** `edge.sxm2027.icu` 已作为本 Worker 的 **Custom Domain** 绑定成功
+（实测：`https://edge.sxm2027.icu/__health` → 200，`/auth/v1/health` → 200，`/functions/v1/*` 透传 Supabase 的 404）。
 
-方案 A 需要同时改两个地方：
+> 说明：`edge.sxm2027.icu` 原先被认为挂在另一个 Worker 上，但实测它当时**没有任何生效记录**（TLS 握手中断，表现与随机子域完全一致），
+> 因此直接按 Custom Domain 绑定即可，无需走方案 A。若你之后确实要把它让给另一个 Worker，改用方案 A 的路径路由即可共存。
+
+当前生效配置（`wrangler.jsonc`）：
+
+```jsonc
+"workers_dev": true,                                    // 保留免费备用入口
+"routes": [{ "pattern": "edge.sxm2027.icu", "custom_domain": true }],
+// vars.PROXY_PREFIX 保持 ""，所以两个入口的路径完全一致
+```
+
+两个入口等价可用：
+
+| 入口 | 地址 |
+| --- | --- |
+| 自定义域名（主） | `https://edge.sxm2027.icu/functions/v1/<函数名>` |
+| workers.dev（备） | `https://antisupabase-api.tdf3497995988.workers.dev/functions/v1/<函数名>` |
+
+若改用**方案 A**（把主机名让给别的 Worker、只要一个路径前缀），需要同时改两处：
 
 ```jsonc
 // wrangler.jsonc
@@ -91,7 +109,7 @@ CORS 白名单的作用就是决定：要不要把这个 Origin 原样回显到 
 三个注意点：
 
 1. 访问要用**带斜杠**的 `/sb/...` 形式（pattern `host/sb/*` 不含裸 `/sb`）；
-2. 放开路由前先确认 `sxm2027.icu` 这个 zone 就在同一个 Cloudflare 账号里（账号里左侧能看到这个域名即是），否则 deploy 会报找不到 zone 并整体失败；
+2. 路由要求 `sxm2027.icu` 这个 zone 就在同一个 Cloudflare 账号里（`d0917c4bb1ee79c4cba46990cc3c023b`），否则 deploy 会报找不到 zone 并整体失败；
 3. 给 supabase-js 用时 base URL 写 `https://edge.sxm2027.icu/sb`（SDK 会自己往后拼 `/auth/v1/token` 等）。
 
 ## 2. 快速开始
@@ -115,7 +133,7 @@ curl -i http://127.0.0.1:8787/functions/v1/<你的函数名>
 
 # 5) 自检 + 部署
 pnpm run check          # typecheck + 40 个单测
-pnpm run deploy         # → https://antisupabase-api.<你的子域>.workers.dev
+pnpm run deploy         # → https://edge.sxm2027.icu
 ```
 
 本地调试时密钥也可以放 `.dev.vars`（复制 `.dev.vars.example`，该文件已被 `.gitignore` 忽略）。
@@ -125,7 +143,7 @@ pnpm run deploy         # → https://antisupabase-api.<你的子域>.workers.de
 **浏览器 / 前端**——不需要任何 Supabase 密钥：
 
 ```js
-const res = await fetch("https://antisupabase-api.<你的子域>.workers.dev/functions/v1/hello", {
+const res = await fetch("https://edge.sxm2027.icu/functions/v1/hello", {
   method: "POST",
   headers: { "content-type": "application/json" }, // 不要加 apikey / Authorization
   body: JSON.stringify({ name: "x" }),
@@ -140,7 +158,7 @@ console.log(res.headers.get("x-request-id"), res.headers.get("x-proxy-cache"));
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
-  "https://antisupabase-api.<你的子域>.workers.dev",
+  "https://edge.sxm2027.icu",
   "not-a-real-key-worker-injects-its-own",
 );
 ```
@@ -148,7 +166,7 @@ const supabase = createClient(
 **curl**：
 
 ```bash
-curl -i -X POST "https://antisupabase-api.<你的子域>.workers.dev/functions/v1/hello" \
+curl -i -X POST "https://edge.sxm2027.icu/functions/v1/hello" \
   -H "content-type: application/json" -d '{"name":"x"}'
 ```
 
