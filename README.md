@@ -114,10 +114,23 @@ CORS 白名单的作用就是决定：要不要把这个 Origin 原样回显到 
 
 ## 2. 快速开始
 
-> ⚠️ **最重要的一条运维注意（本项目已踩过）**：`wrangler deploy` 默认会把「Wrangler 配置里没有声明的 vars 与 secrets 全部删除」，
-> 也就是会把 `wrangler secret put` 注入的 Supabase 密钥一起抹掉，线上表现为 **500 `MISSING_CONFIG`**。
-> `wrangler.jsonc` 已固定 `"keep_vars": true` 来避免这件事；如果你手工敲命令，请写成 `pnpm wrangler deploy --keep-vars`。
-> 详见 [Cloudflare 文档 keep_vars](https://developers.cloudflare.com/workers/wrangler/configuration/)。
+> ⚠️ **最重要的一条运维注意（本项目踩过两次）**
+>
+> `wrangler secret put/bulk` 走的是**旧的 script-secrets 接口**，密钥挂在 script 上；
+> 而 `wrangler deploy` 会创建一个新的 **version**，该 version 的绑定快照来自 `wrangler.jsonc` —— **不含**刚才那个 script-secret。
+>
+> 后果：`wrangler secret list` 里密钥明明都在，线上 `env` 里却是空的 → 接口返回 **500 `MISSING_CONFIG`**；
+> 更阴的是**症状会延后几分钟才出现**（边缘节点仍在跑上一个版本），很容易误判成"上次配置又坏了"。
+> `keep_vars: true` 只能保住 vars，**保不住 secret 绑定**。
+>
+> **正确顺序只有一个：先 `deploy` 代码，再传密钥，顺序不可颠倒。**
+> 本仓库已把它固化成一条命令（部署 → 补密钥 → 拉 `/__health` 自证 `has_service_role_key`，不通过就非 0 退出）：
+>
+> ```bash
+> pnpm run deploy          # = node scripts/deploy.mjs
+> ```
+>
+> 手工敲命令时请务必写成：`pnpm wrangler deploy --keep-vars` **然后** `pnpm wrangler secret bulk <file>`。
 
 ```bash
 # 1) 安装依赖
@@ -303,8 +316,9 @@ curl -s -X POST "http://127.0.0.1:8787/functions/v1/hello" \
 | --- | --- |
 | `pnpm install` 只打印 `Already up to date` 且没有 `node_modules` | 上级目录（如 `C:\Users\<你>\`）有 `pnpm-workspace.yaml`，被当成了它的子目录。仓库根的 `pnpm-workspace.yaml` 已修好这点；若仍复现，用 `pnpm install --ignore-workspace`。 |
 | 本地 `pnpm run dev` 报缺密钥 | `.dev.vars` 没建好，或名字拼错（大小写敏感）。 |
-| 线上 500 `MISSING_CONFIG`（但 `wrangler secret list` 明明能看到密钥） | **`wrangler deploy` 默认会把「配置里没写的 vars 与 secrets 全部删除」**（Wrangler 配置是唯一事实源），密钥绑定会被一起抹掉。`wrangler.jsonc` 已加 `"keep_vars": true`；手工部署请带 `--keep-vars`。详见下方 §2 的注意事项。 |
-| 线上 500 `MISSING_CONFIG`（密钥确实没传过） | `wrangler secret put` 没执行，或 `SUPABASE_PROJECT_REF` 还是占位值。 |
+| 线上 500 `MISSING_CONFIG`（但 `wrangler secret list` 明明能看到密钥） | **`wrangler secret bulk/put` 之后又跑过 `wrangler deploy`**：新版本的绑定快照里不含 script-secret。改为先 `deploy` 再传密钥，用 `pnpm run deploy` 一键完成（脚本会自证 `has_service_role_key`）。注意症状可能延后几分钟出现。 |
+| 线上 500 `MISSING_CONFIG`（密钥确实没传过） | 密钥从未上传，或 `SUPABASE_PROJECT_REF` 还是占位值。 |
+| 想确认密钥到底有没有进 runtime `env` | `curl https://edge.sxm2027.icu/__health` 看 `has_service_role_key` / `has_anon_key` 两个布尔字段（只回布尔，不回显密钥）。 |
 | 浏览器 CORS 报错 | `ALLOWED_ORIGINS` 没加你的前端来源（含端口与协议，`https://` 与 `http://` 视作不同来源）。 |
 | 401/403 来自 Supabase 而不是 Worker | 该路径的 key 选错了：检查 `SERVICE_KEY_PREFIXES` / `ANON_KEY_PREFIXES`。 |
 | 上传/下载大文件异常 | 确认没有给 `CACHE_PATH_PREFIXES` 加进非 public 的 storage 前缀，且未对带 `Range` 的请求启用缓存（代码已跳过 Range）。 |
@@ -329,6 +343,8 @@ pnpm run mock:upstream  # 本地假上游，127.0.0.1:8801
 pnpm run typecheck      # tsc --noEmit
 pnpm run test           # vitest，41 个用例
 pnpm run check          # typecheck + test
+pnpm run deploy         # ✅ 唯一推荐：deploy → 补密钥 → /__health 自证（顺序不会错）
+pnpm run deploy:raw     # 只发代码（wrangler deploy --keep-vars），不带密钥
+pnpm run secret:sync    # 只补密钥（先把代码发出去）
 pnpm run tail           # 实时日志
-pnpm run deploy         # 部署
 ```

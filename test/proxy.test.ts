@@ -162,6 +162,8 @@ describe("路由与 CORS", () => {
 
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
+    expect(body.has_service_role_key).toBe(true);
+    expect(body.has_anon_key).toBe(true);
     expect(calls).toHaveLength(0);
   });
 

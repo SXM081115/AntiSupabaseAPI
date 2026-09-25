@@ -6,7 +6,9 @@
   "description": "Cloudflare Worker reverse proxy for Supabase Edge API (/functions/v1, /auth/v1, /storage/v1) with server-side key injection.",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy --keep-vars",
+    "deploy": "node scripts/deploy.mjs",
+    "deploy:raw": "wrangler deploy --keep-vars",
+    "secret:sync": "node scripts/deploy.mjs --skip-verify",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

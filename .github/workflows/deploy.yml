@@ -62,8 +62,10 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           packageManager: pnpm
-          # --keep-vars 必须带：否则 deploy 会删掉配置未声明的 vars/secrets，
-          # 把 SUPABASE_* 密钥绑定一起抹掉，线上表现为 500 MISSING_CONFIG
+          # ⚠️ 顺序至关重要：wrangler-action 的 secrets 块是在 deploy 之后执行的，
+          # 这正好满足「先发代码、再传密钥」的要求；反过来会把 script-secret 绑定弄丢，
+          # 线上表现为 500 MISSING_CONFIG（详见 README 第 2 节）。
+          # --keep-vars 用于保住配置未声明的 vars。
           command: deploy --keep-vars
           secrets: |
             SUPABASE_SERVICE_ROLE_KEY

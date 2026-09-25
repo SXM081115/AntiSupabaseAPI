@@ -24,6 +24,11 @@ function isHealthRequest(url: URL, env: Env): boolean {
 /**
  * 健康检查：不触碰上游，且在配置缺失时也能回答（返回 503 + config_error），
  * 这样「配错了」和「服务挂了」在监控上能分得清。
+ *
+ * 同时暴露「密钥是否真的绑定到了运行时 env」—— 这是本仓库踩过的真实坑：
+ * wrangler secret bulk 走旧的 script-secrets 接口，若之后又跑 wrangler deploy，
+ * 新版本的绑定快照里会丢掉密钥，表现为 500 MISSING_CONFIG，但 secret list 里密钥仍在。
+ * 这里只回布尔值，绝不回显密钥内容或长度。
  */
 function handleHealth(url: URL, env: Env, request: Request, requestId: string): Response {
   let cfg: AppConfig | null = null;
@@ -34,16 +39,23 @@ function handleHealth(url: URL, env: Env, request: Request, requestId: string): 
     configError = err instanceof Error ? err.message : String(err);
   }
 
+  const hasServiceKey = (env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim().length > 0;
+  const hasAnonKey = (env.SUPABASE_ANON_KEY ?? "").trim().length > 0;
+  // service key 是必需的（/functions/v1 与 /auth/v1/admin 都靠它）
+  const ok = configError === null && hasServiceKey;
+
   const payload = {
-    ok: configError === null,
+    ok,
     service: "antisupabase-api",
     version: VERSION,
     config_ok: configError === null,
+    has_service_role_key: hasServiceKey,
+    has_anon_key: hasAnonKey,
     ...(configError ? { config_error: configError } : {}),
     time: new Date().toISOString(),
   };
 
-  const base = jsonResponse(payload, configError ? 503 : 200);
+  const base = jsonResponse(payload, ok ? 200 : 503);
   if (cfg) return withCors(base, request, cfg, requestId, "BYPASS");
 
   const headers = new Headers(base.headers);
